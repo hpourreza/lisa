@@ -324,11 +324,6 @@ Function Copy-RemoteFiles($uploadTo, $downloadFrom, $downloadTo, $port, $files, 
 	}
 	elseif ($download) {
 		foreach ($file in $fileList) {
-			if ($username -ne "root") {
-				$chown_cmd = "chown -Rf ${username}: $file"
-				Write-LogInfo "$chown_cmd"
-				$out = Run-LinuxCmd -username $username -password $password -ip $downloadFrom -port $port -command "$chown_cmd" -runAsSudo
-			}
 			Download-RemoteFile -downloadFrom $downloadFrom -downloadTo $downloadTo -port $port -file $file -username $username `
 				-password $password -usePrivateKey $usePrivateKey $maxRetry
 		}
@@ -352,6 +347,57 @@ Function Wrap-CommandsToFile([string] $username, [string] $password, [string] $i
 		$command | out-file -encoding ASCII -filepath "$LogDir\$fileName"
 		Copy-RemoteFiles -upload -uploadTo $ip -username $username -port $port -password $password -files "$LogDir\$fileName"
 		Remove-Item "$LogDir\$fileName"
+	}
+}
+
+Function Set-UMask([string] $username, [string] $password, [string] $ip, [int] $port) {
+	if ("root" -ne $username) {
+		Write-LogInfo "Set umask for appropriate file permissions"
+		if ($global:sshPrivateKey) {
+			$usePrivateKey = $true
+			$credential = $global:sshPrivateKey
+		}
+		else {
+			$usePrivateKey = $false
+			$credential = $password
+		}
+		$pLinkJobTimeoutInSeconds = 90
+		$plinkJob = Start-Job -ScriptBlock {
+			Set-Location $args[0];
+			if ($Using:usePrivateKey) {
+				$output = Write-Output "y" | .\Tools\plink.exe -ssh -C -v -i $args[1] -P $Using:port "$Using:username@$Using:ip" "sudo -S bash -c 'cat /etc/os-release | grep ^ID | cut -d= -f2'" 2> $null
+				if ($output -eq "mariner") {
+					Write-Output "y" | .\Tools\plink.exe -ssh -C -v -i $args[1] -P $Using:port "$Using:username@$Using:ip" "sudo -S bash -c '[[ `$(umask) -ne 0022 ]] && echo `"umask 0022`" >> /etc/bash.bashrc'" 2> $null
+				} else {
+					Write-Output "y" | .\Tools\plink.exe -ssh -C -v -i $args[1] -P $Using:port "$Using:username@$Using:ip" "sudo -S bash -c '[[ `$(umask) -ne 0022 ]] && chfn -o umask=0022 $Using:username'" 2> $null
+				}
+				$output = Write-Output "y" | .\Tools\plink.exe -ssh -C -v -i $args[1] -P $Using:port "$Using:username@$Using:ip" "sudo -S bash -c 'umask'" 2> $null
+			} else {
+				$output = Write-Output "y" | .\Tools\plink.exe -ssh -C -v -pw $args[1] -P $Using:port "$Using:username@$Using:ip" "echo $Using:password | sudo -S bash -c 'cat /etc/os-release | grep ^ID | cut -d= -f2'" 2> $null
+				if ($output -eq "mariner") {
+					Write-Output "y" | .\Tools\plink.exe -ssh -C -v -pw $args[1] -P $Using:port "$Using:username@$Using:ip" "echo $Using:password | sudo -S bash -c '[[ `$(umask) -ne 0022 ]] && echo `"umask 0022`" >> /etc/bash.bashrc'" 2> $null
+				} else {
+					Write-Output "y" | .\Tools\plink.exe -ssh -C -v -pw $args[1] -P $Using:port "$Using:username@$Using:ip" "echo $Using:password | sudo -S bash -c '[[ `$(umask) -ne 0022 ]] && chfn -o umask=0022 $Using:username'" 2> $null
+				}
+				$output = Write-Output "y" | .\Tools\plink.exe -ssh -C -v -pw $args[1] -P $Using:port "$Using:username@$Using:ip" "echo $Using:password | sudo -S bash -c 'umask'" 2> $null
+			}
+			Write-Output $output
+		} -ArgumentList $PWD, $credential, $username
+		$plinkJob | Wait-Job -Timeout $pLinkJobTimeoutInSeconds | Out-Null
+
+		if ($plinkJob.State -eq "Running") {
+			Remove-Job -Job $plinkJob -Force | Out-Null
+			Throw "plink timeout for setting umask after $pLinkJobTimeoutInSeconds seconds!"
+		}
+		# No matter the Job ended with "Completed" or not, just read and remove-Job
+		$plinkJobConsoleOutput = [string](Receive-Job -Job $plinkJob 2>&1)
+		Remove-Job -Job $plinkJob -Force | Out-Null
+		# Check the current umask
+		if ($plinkJobConsoleOutput -imatch "0022") {
+			Write-LogDbg "Expected umask (0022) is in place"
+		} else {
+			Throw "Incorrect umask ($plinkJobConsoleOutput) and will cause problem with further execution."
+		}
 	}
 }
 
@@ -399,6 +445,8 @@ Function Get-AvailableExecutionFolder([string] $username, [string] $password, [s
 
 Function Run-LinuxCmd([string] $username, [string] $password, [string] $ip, [string] $command, [int] $port, [switch]$runAsSudo, [Boolean]$WriteHostOnly, [Boolean]$NoLogsPlease, [switch]$ignoreLinuxExitCode, [int]$runMaxAllowedTime = 300, [switch]$RunInBackGround, [int]$maxRetryCount = 1, [string] $MaskStrings) {
 	if (!$global:AvailableExecutionFolder) {
+		# Set umask during first execution
+		Set-UMask $username $password $ip $port
 		Get-AvailableExecutionFolder $username $password $ip $port
 	}
 	$progressId = [int](Select-String -Pattern '[a-zA-Z]+([0-9]+)' -InputObject $global:TestId).Matches.Groups[1].Value
