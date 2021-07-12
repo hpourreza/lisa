@@ -34,7 +34,7 @@ version, otherwise this error will appear:
 
 ``/usr/bin/env: ‘python\r’: No such file or directory``
 
-Cannot find package after run \`poetry install\`
+Cannot find package after run ``poetry install``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Poetry is case sensitive, which means it differentiates directories like
@@ -48,6 +48,15 @@ Error: Poetry could not find a pyproject.toml file
 Poetry provides different packages according to the folder, and depends
 on the ``pyproject.toml`` file in the current folder. Make sure to run
 ``poetry`` in the root folder of LISA.
+
+Missing a lot of packages
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+First, make sure you are currently in the root of your code folder (where you
+cloned LISA source code). Then run ``poetry install`` again to ensure that
+poetry has successfully set up all the dependencies. If you still have problems
+after running this command, refer to `Issue #1401
+<https://github.com/microsoft/lisa/issues/1401>`__ for more information.
 
 Using VSCode
 ------------
@@ -71,12 +80,12 @@ Refer to
 `DeprecatePythonPath <https://github.com/microsoft/vscode-python/wiki/AB-Experiments>`__
 for more information.
 
-.. TL;DR::
+.. admonition:: TL;DR
 
-"We removed the “python.pythonPath” setting from your settings.json
-file as the setting is no longer used by the Python extension. You
-can get the path of your selected interpreter in the Python output
-channel."
+   "We removed the “python.pythonPath” setting from your settings.json
+   file as the setting is no longer used by the Python extension. You
+   can get the path of your selected interpreter in the Python output
+   channel."
 
 An alternative way is to simply select the Poetry Python interpreter as
 the default interpreter in the workspace, as in `Cannot find Python
